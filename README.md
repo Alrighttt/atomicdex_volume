@@ -1,7 +1,7 @@
 `pip3 install requests slick-bitcoinrpc`
 
 
-This script will scrape the specified ALICE_CHAIN for "dex fee" transactions. From there it will find the corresponding swap txids on both chains if they exist. 
+This script will scrape the specified ALICE_CHAIN for "dex fee" transactions. From there it will find the corresponding swap txids on both chains if they exist. It requires spent index and address index enabled on both chains. 
 
 It will save all swap data to `<ALICE_CHAIN>_<BOB_CHAIN>.json` and completed swap data to `<ALICE_CHAIN>_<BOB_CHAIN>_completed.json`
 
