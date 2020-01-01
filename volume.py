@@ -5,7 +5,9 @@ import platform
 import os
 import re
 import json
+import pprint # FIXME
 from slickrpc import Proxy
+
 
 # define data dir
 def def_data_dir():
@@ -45,117 +47,72 @@ def def_credentials(chain):
             exit(1)
 
     return (Proxy("http://%s:%s@127.0.0.1:%d" % (rpcuser, rpcpassword, int(rpcport))))
-    
 
-# given DEX transaction, find alice address and alice->b txid if it exists
-def find_alice(rpc, txid):
-    tx = rpc.getrawtransaction(txid, 2)
-    invalid = [False, False, False]
-    # FIXME add as many checks as possible here to narrow down if it's mm2 tx
-    # can check script of vins/vouts
-    # can hardcode chain specific heights to start at
-    # can check via timestamp
-    # can check txfee if it's standard
-    if tx['version'] != 4:
-        return(invalid)
-    if len(tx['vin']) != 1:
-        return(invalid)
-    if len(tx['vout']) != 2:
-        return(invalid)
-        
-    # FIX ME if dex fee is not 1/777*alice_b, bob chain IS KMD
-    
-    try:
-        alice_b = tx['vout'][1]['spentTxId']
-    except:
-        alice_b = False
-    # this can fail because of non-mm2 txes sent to DEX address
-    # safely ignored
-    try:
-        return([tx['vout'][1]['scriptPubKey']['addresses'][0], alice_b, tx['vout'][0]['valueSat']])
-    except Exception as e:
-        return(invalid)
 
-#given alice->b txid, find bob address, alice volume, b_bob tx and mutual script
-def find_bob(rpc, txid):
-    invalid = [False,False,False,False]
-    alice_b_tx = rpc.getrawtransaction(txid, 2)
-    try:
-        b_bob_txid = alice_b_tx['vout'][0]['spentTxId']
-        vout_index = alice_b_tx['vout'][0]['spentIndex']
-    except Exception as e:
-        return(invalid)
-    b_bob_tx = rpc.getrawtransaction(b_bob_txid, 2)
-    
-    # this can fail because of non-mm2 txes sent to DEX address
-    # safely ignored
-    try:
-        bob_addr = b_bob_tx['vout'][vout_index]['scriptPubKey']['addresses'][0]
-        volume = alice_b_tx['vout'][0]['valueSat']
-        # FIXME need to be 100% sure this value is in static position
-        script = b_bob_tx['vin'][0]['scriptSig']['hex'][-284:-220]
-    except Exception as e:
-        #print(e)
-        return(invalid)
-    return([bob_addr, volume, b_bob_txid, script])
+# find all p2sh transactions of addresses asscociated with DEX fee address
+# doing this in daemon will speed this script up significantly
+def all_p2sh(rpc, addrs):
+    DEX_txids = rpc.getaddresstxids({"addresses": ['RThtXup6Zo7LZAi8kRWgjAyi1s4u6U9Cpf']}) # DEX fee address
+    for txid in DEX_txids:
+        tx = rpc.getrawtransaction(txid, 2)
+        if tx['vin'][0]['address'] not in addrs:
+            addrs.append(tx['vin'][0]['address']) 
+    all_alice_txids = rpc.getaddresstxids({"addresses": addrs})
+    p2sh_txids = []
+
+    for txid in all_alice_txids:
+        tx = rpc.getrawtransaction(txid, 2)
+        for vout in tx['vout']:
+            if vout['scriptPubKey']['type'] == 'scripthash':
+                p2sh_txids.append([txid, vout['n']])
+    return(p2sh_txids)
+
+
+# find scriptsig that should be mutual between alice and bob
+def mutual_scripts(rpc, txids):
+    mutuals = {}
+    addrs = []
+    for txid in txids:
+        tx = rpc.getrawtransaction(txid[0], 2)
+        if 'spentTxId' in tx['vout'][txid[1]]:
+            spent_txid = tx['vout'][txid[1]]['spentTxId']
+        else: # this can pick up failed or in progress 2/5 or 3/5 swaps if desired
+            continue 
+        spent_tx = rpc.getrawtransaction(spent_txid, 2)
+        bob_addr = spent_tx['vout'][0]['scriptPubKey']['addresses'][0]
+        if bob_addr not in addrs:
+            addrs.append(bob_addr)
+        mutual = spent_tx['vin'][0]['scriptSig']['hex'][-284:-220]
+        if len(mutual) == 64:
+            mutuals[mutual] = [txid[0], spent_txid]
+
+    return(mutuals, addrs)
 
     
 ALICE_CHAIN = 'MORTY'
 BOB_CHAIN = 'RICK'
 ALICE_RPC = def_credentials(ALICE_CHAIN)
 BOB_RPC = def_credentials(BOB_CHAIN)
-DEX = 'RThtXup6Zo7LZAi8kRWgjAyi1s4u6U9Cpf'
-DEX_txids = ALICE_RPC.getaddresstxids({"addresses": [DEX]})
 
-#highest = [0,0,0]
-amount_total = 0
+alice_p2sh = all_p2sh(ALICE_RPC, [])
+alice_mutuals, bob_addrs = mutual_scripts(ALICE_RPC, alice_p2sh)
+
+bob_p2sh = all_p2sh(BOB_RPC, bob_addrs)
+bob_mutuals, alice_addrs = mutual_scripts(BOB_RPC, bob_p2sh)
+
 swaps = []
-# -amount of previous DEX fee addr txes
-for txid in DEX_txids[-10000:]:
-    alice_addr, alice_b, fee_amount = find_alice(ALICE_RPC, txid)
-    if alice_b:
-        bob_addr, volume, b_bob, script = find_bob(ALICE_RPC, alice_b)
-        if bob_addr:
-            swap = {
-                    'alice_addr':alice_addr,
-                    'bob_addr':bob_addr,
-                    'script': script,
-                    '0_fee_txid': [txid, fee_amount],
-                    '1_alice_b': [alice_b, volume],  
-                    '3_b_bob': [b_bob]
-                    }
-            if swap not in swaps:
-                swaps.append(swap)
-            # this if can be removed, just tracks the highest volume swap
-            #if fee_amount > highest[0]:
-            #    highest = [fee_amount,txid, bob_addr, alice_addr]
-            #amount_total += fee_amount
 
-completed_swaps = []
+for bob_mutual in bob_mutuals:
+    if bob_mutual in alice_mutuals:
+        swap = {
+        "1_alice_b": alice_mutuals[bob_mutual][0],
+        "2_bob_b": bob_mutuals[bob_mutual][0],
+        "3_b_alice": alice_mutuals[bob_mutual][1],
+        "4_b_bob": bob_mutuals[bob_mutual][1]
+        }
+        swaps.append(swap)
 
-# populate all alices getaddresstxids
-address_txids = {}
-for swap in swaps:
-    alice_txids = []
-    if swap['alice_addr'] not in address_txids:
-        alice_txids = BOB_RPC.getaddresstxids({"addresses": [swap['alice_addr']]})
-        address_txids[swap['alice_addr']] = alice_txids
-
-for swap in swaps:
-    for alice_txid in address_txids[swap['alice_addr']]:
-        tx = BOB_RPC.getrawtransaction(alice_txid, 2)
-        # FIXME need to be 100% sure this value is in static position
-        if tx['vin'][0]['scriptSig']['hex'][-284:-220] == swap['script']:
-            swap['2_bob_b'] = [tx['vin'][0]['txid'], tx['vout'][0]['valueSat']]
-            swap['4_b_alice'] = [alice_txid]
-            completed_swaps.append(swap)
-            address_txids[swap['alice_addr']].remove(alice_txid)
-    
-    
 f = open(ALICE_CHAIN + "_" + BOB_CHAIN + ".json", "w+")
 f.write(json.dumps(swaps))
 
-f = open(ALICE_CHAIN + "_" + BOB_CHAIN + "_completed.json", "w+")
-f.write(json.dumps(completed_swaps))
-
-    
+print(len(swaps))
