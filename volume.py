@@ -57,10 +57,20 @@ def all_p2sh(rpc, addrs):
         tx = rpc.getrawtransaction(txid, 2)
         if tx['vin'][0]['address'] not in addrs:
             addrs.append(tx['vin'][0]['address']) 
+    try: # dpow addr needs to be removed or getaddresstxids will time out 
+        addrs.remove('RXL3YXG2ceaB6C5hfJcN4fvmLH2C34knhA')
+    except:
+        pass
     all_alice_txids = rpc.getaddresstxids({"addresses": addrs})
     p2sh_txids = []
 
+    count = 0
+    total = len(all_alice_txids)
     for txid in all_alice_txids:
+        count += 1 
+        print('ALL TXIDS COUNT', count)
+        print('TOTAL', total)
+        print('\n')
         tx = rpc.getrawtransaction(txid, 2)
         for vout in tx['vout']:
             if vout['scriptPubKey']['type'] == 'scripthash':
@@ -89,8 +99,8 @@ def mutual_scripts(rpc, txids):
     return(mutuals, addrs)
 
     
-ALICE_CHAIN = 'MORTY'
-BOB_CHAIN = 'RICK'
+ALICE_CHAIN = 'KMD'
+BOB_CHAIN = 'LABS'
 ALICE_RPC = def_credentials(ALICE_CHAIN)
 BOB_RPC = def_credentials(BOB_CHAIN)
 
@@ -101,6 +111,9 @@ bob_p2sh = all_p2sh(BOB_RPC, bob_addrs)
 bob_mutuals, alice_addrs = mutual_scripts(BOB_RPC, bob_p2sh)
 
 swaps = []
+print('bob mutuals len', len(bob_mutuals))
+print('alice mutuals len', len(alice_mutuals))
+
 
 for bob_mutual in bob_mutuals:
     if bob_mutual in alice_mutuals:
