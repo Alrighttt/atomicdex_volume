@@ -84,8 +84,8 @@ def mutual_scripts(rpc, txids):
 
     return(mutuals)
 
-ALICE_CHAIN = 'RICK'
-BOB_CHAIN = 'MORTY'
+ALICE_CHAIN = sys.argv[1]
+BOB_CHAIN = sys.argv[2]
 ALICE_RPC = def_credentials(ALICE_CHAIN)
 BOB_RPC = def_credentials(BOB_CHAIN)
 
