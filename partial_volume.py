@@ -114,7 +114,7 @@ for bob_mutual in bob_mutuals:
         }
         swaps.append(swap)
 
-f = open(ALICE_CHAIN + "_" + BOB_CHAIN + "_24hr.json", "w+")
+f = open(ALICE_CHAIN + "_" + BOB_CHAIN + "_partial.json", "w+")
 f.write(json.dumps(swaps))
 
 alice_vol = 0
