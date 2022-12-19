@@ -8,7 +8,7 @@ import json
 import sys
 from slickrpc import Proxy
 
-
+import pdb
 
 # define data dir
 def def_data_dir():
@@ -77,10 +77,14 @@ def mutual_scripts(rpc, txids):
         else: # this can pick up failed or in progress 2/5 or 3/5 swaps if desired
             continue 
         spent_tx = rpc.getrawtransaction(spent_txid, 2)
-        bob_addr = spent_tx['vout'][0]['scriptPubKey']['addresses'][0]
+        #bob_addr = spent_tx['vout'][0]['scriptPubKey']['addresses'][0]
+        if spent_tx['vout']:
+            spend_amount = spent_tx['vout'][0]['valueSat']
+        else:
+            spend_amount = abs(spent_tx['valueBalance'])
         mutual = spent_tx['vin'][0]['scriptSig']['hex'][-284:-220]
         if len(mutual) == 64:
-            mutuals[mutual] = [[txid[0], tx['vout'][txid[1]]['valueSat']], [spent_txid, spent_tx['vout'][0]['valueSat']]]
+            mutuals[mutual] = [[txid[0], tx['vout'][txid[1]]['valueSat']], [spent_txid, spend_amount]]
 
     return(mutuals)
 
